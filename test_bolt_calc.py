@@ -1,7 +1,8 @@
 import math
 import unittest
 
-from bolt_calc import analyze, parse_size, tensile_stress_area
+from bolt_calc import (analyze, joint_constant, parse_size,
+                       tensile_stress_area, thread_length)
 
 
 class TensileStressArea(unittest.TestCase):
@@ -33,7 +34,56 @@ class ParseSize(unittest.TestCase):
         self.assertEqual(parse_size("m12"), (12.0, "metric"))
 
 
+class JointStiffness(unittest.TestCase):
+    def test_thread_length(self):
+        # Shigley Table 8-7.
+        self.assertEqual(thread_length(0.5, 2.0, "inch"), 1.25)
+        self.assertEqual(thread_length(0.5, 8.0, "inch"), 1.5)
+        self.assertEqual(thread_length(12, 45, "metric"), 30)
+        self.assertEqual(thread_length(12, 150, "metric"), 36)
+        self.assertEqual(thread_length(12, 250, "metric"), 49)
+
+    def test_half_inch_steel(self):
+        # Hand calculation: 1/2-13, grip 1.5 in, bolt 2.0 in, steel.
+        # LT = 1.25 -> ld = 0.75, lt = 0.75
+        # kb = Ad*At*E/(Ad*lt + At*ld) = 3.295e6 lbf/in       (eq. 8-17)
+        # km = E*d*A*exp(B*d/l) = 30e6*0.5*0.78715*e^0.20958 = 1.456e7
+        at = tensile_stress_area(0.5, "inch", "coarse")[0]
+        k = joint_constant(0.5, at, "inch", grip=1.5, bolt_length=2.0)
+        self.assertAlmostEqual(k.ld, 0.75)
+        self.assertAlmostEqual(k.lt, 0.75)
+        self.assertAlmostEqual(k.kb / 1e6, 3.295, places=3)
+        self.assertAlmostEqual(k.km / 1e6, 14.56, places=2)
+        self.assertAlmostEqual(k.c, 0.1845, places=3)
+
+    def test_fully_threaded_in_grip(self):
+        # Short bolt: thread length exceeds bolt length, so no shank in grip.
+        k = joint_constant(0.5, 0.1419, "inch", grip=1.0, bolt_length=1.25)
+        self.assertEqual(k.ld, 0)
+        self.assertEqual(k.lt, 1.0)
+
+    def test_softer_members_raise_c(self):
+        at = tensile_stress_area(12, "metric", "coarse")[0]
+        steel = joint_constant(12, at, "metric", 30, 45, "steel")
+        alum = joint_constant(12, at, "metric", 30, 45, "aluminum")
+        self.assertGreater(alum.c, steel.c)
+
+    def test_bad_inputs(self):
+        with self.assertRaises(ValueError):
+            joint_constant(0.5, 0.1419, "inch", grip=2.0, bolt_length=1.5)
+        with self.assertRaises(ValueError):
+            joint_constant(0.5, 0.1419, "inch", 1.5, 2.0, member="wood")
+        with self.assertRaises(ValueError):
+            analyze("1/2", "5", load_max=5000, grip=1.5)
+
+
 class Analysis(unittest.TestCase):
+    def test_calculated_c_is_used(self):
+        r = analyze("1/2", "5", load_max=5000, c=0.9,
+                    grip=1.5, bolt_length=2.0)
+        self.assertAlmostEqual(r.c, r.stiffness.c)
+        self.assertAlmostEqual(r.c, 0.1845, places=3)
+
     def test_preloaded_joint_half_inch_grade5(self):
         # Hand calculation (Shigley 8-11 method):
         # At = 0.1419, Fi = 0.75*85000*0.1419 = 9046 lbf

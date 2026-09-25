@@ -9,6 +9,7 @@ verify results before using them for design.
 ```
 python3 bolt_calc.py --size 1/2 --grade 5 --load-max 5000
 python3 bolt_calc.py --size M12 --grade 8.8 --load-max 20000 --no-joint
+python3 bolt_calc.py --size 1/2 --grade 5 --load-max 5000 --grip 1.5 --bolt-length 2
 python3 bolt_calc.py --help
 ```
 
@@ -21,6 +22,8 @@ python3 bolt_calc.py --help
 | `--load-max`, `--load-min` | External tensile load range (lbf or N) |
 | `--preload`, `--preload-fraction` | Preload; default 0.75 x proof load |
 | `--c` | Joint constant kb/(kb+km); default 0.25 is an assumption |
+| `--grip`, `--bolt-length` | Clamped thickness incl. washers, and bolt length under head; calculates C instead of `--c` |
+| `--member` | Clamped material: `steel`, `aluminum`, `copper`, `cast-iron` |
 | `--no-joint` | Bare bolt: no preload, bolt carries the full load |
 
 Output: tensile stress area, proof/yield/ultimate/endurance strengths,
@@ -31,7 +34,9 @@ infinite life) and joint separation.
 
 - Endurance strengths for SAE 1/2 and ISO 4.6/4.8/5.8, and all cut-thread
   values, are estimates scaled from Shigley Tables 8-16/8-17.
-- Joint stiffness C is an input, not calculated from grip geometry.
+- Calculated C uses Shigley eq. 8-17 (bolt) and Wileman eq. 8-23 (members):
+  through-bolt with nut, both members the same material, standard thread
+  length (Table 8-7). Not valid for tapped holes or mixed materials.
 - Tension only: no shear, bending, or finite-life fatigue.
 
 ## Tests

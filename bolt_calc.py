@@ -91,6 +91,16 @@ LOW_STRENGTH = {"1", "2", "4.6", "4.8", "5.8"}
 # Used to estimate grades that Table 8-17 does not list.
 SE_RATIO_AT_KF3 = 0.155
 
+# Shigley Table 8-8: member elastic modulus (psi, MPa) and Wileman
+# constants A, B for km = E*d*A*exp(B*d/l).
+MEMBERS = {
+    "steel": (30.0e6, 206.8e3, 0.78715, 0.62873),
+    "aluminum": (10.3e6, 71.0e3, 0.79670, 0.63816),
+    "copper": (17.3e6, 118.6e3, 0.79568, 0.63553),
+    "cast-iron": (14.5e6, 100.0e3, 0.77871, 0.61616),
+}
+BOLT_E = {"inch": 30.0e6, "metric": 206.8e3}  # all listed grades are steel
+
 
 # --- Calculations -----------------------------------------------------------
 
@@ -150,6 +160,45 @@ def endurance_strength(grade, d, threads, sut):
     return se, note
 
 
+def thread_length(d, bolt_length, system):
+    """Standard thread length LT (Shigley Table 8-7)."""
+    if system == "inch":
+        return 2 * d + (0.25 if bolt_length <= 6 else 0.5)
+    if bolt_length <= 125:
+        return 2 * d + 6
+    return 2 * d + (12 if bolt_length <= 200 else 25)
+
+
+@dataclass
+class Stiffness:
+    kb: float  # bolt stiffness, lbf/in or N/mm
+    km: float  # member stiffness
+    c: float   # kb / (kb + km)
+    ld: float  # unthreaded length in grip
+    lt: float  # threaded length in grip
+
+
+def joint_constant(d, at, system, grip, bolt_length, member="steel"):
+    """Joint constant C from bolt and member stiffness.
+
+    Assumes a through-bolt with nut, both members of the same material,
+    and grip = total clamped thickness including washers.
+    """
+    if member not in MEMBERS:
+        raise ValueError(f"Unknown member material '{member}'. "
+                         f"Available: {', '.join(MEMBERS)}")
+    if grip <= 0 or bolt_length < grip:
+        raise ValueError("Need grip > 0 and bolt length >= grip.")
+    ad = math.pi / 4 * d ** 2
+    ld = min(max(bolt_length - thread_length(d, bolt_length, system), 0), grip)
+    lt = grip - ld
+    kb = ad * at * BOLT_E[system] / (ad * lt + at * ld)  # Shigley eq. 8-17
+    e_psi, e_mpa, a, b = MEMBERS[member]
+    e = e_psi if system == "inch" else e_mpa
+    km = e * d * a * math.exp(b * d / grip)  # Wileman, Shigley eq. 8-23
+    return Stiffness(kb, km, kb / (kb + km), ld, lt)
+
+
 @dataclass
 class Result:
     at: float
@@ -168,16 +217,19 @@ class Result:
     n_ultimate: float
     n_fatigue: float
     n_separation: float  # inf when there is no joint
+    stiffness: Stiffness = None  # set when C was calculated
 
 
 def analyze(size, grade, series="coarse", threads="rolled",
             load_max=0.0, load_min=0.0, preload=None,
-            preload_fraction=0.75, c=0.25, joint=True):
+            preload_fraction=0.75, c=0.25, joint=True,
+            grip=None, bolt_length=None, member="steel"):
     """Analyze a bolt under an external tensile load cycling load_min..load_max.
 
     joint=True : preloaded clamped joint (Shigley 8-11). Bolt share of the
                  external load is C = kb/(kb+km). preload defaults to
-                 preload_fraction * proof load.
+                 preload_fraction * proof load. If grip and bolt_length
+                 are given, C is calculated and the c argument is ignored.
     joint=False: bare bolt carrying the full load (C = 1, no preload).
     """
     d, system = parse_size(size)
@@ -185,9 +237,15 @@ def analyze(size, grade, series="coarse", threads="rolled",
     st = material_strength(grade, d, system)
     se, se_note = endurance_strength(grade, d if system == "inch" else 0,
                                      threads, st.ultimate)
+    stiffness = None
     if not joint:
         c, fi = 1.0, 0.0
     else:
+        if grip is not None or bolt_length is not None:
+            if grip is None or bolt_length is None:
+                raise ValueError("Give both grip and bolt length.")
+            stiffness = joint_constant(d, at, system, grip, bolt_length, member)
+            c = stiffness.c
         fi = preload if preload is not None else preload_fraction * st.proof * at
 
     bolt_max = fi + c * load_max
@@ -210,7 +268,7 @@ def analyze(size, grade, series="coarse", threads="rolled",
 
     return Result(at, pitch, st, se, se_note, fi, c, bolt_max, stress_max,
                   sigma_a, sigma_m, factor(st.yield_), factor(st.proof),
-                  factor(st.ultimate), n_f, n_sep)
+                  factor(st.ultimate), n_f, n_sep, stiffness)
 
 
 # --- Command line -----------------------------------------------------------
@@ -234,7 +292,18 @@ def report(r, system):
         f"Endurance strength Se  : {r.se:,.0f} {su} ({r.se_note})",
         "",
         f"Preload Fi             : {r.preload:,.0f} {fu}",
-        f"Joint constant C       : {r.c:.3g}",
+    ]
+    if r.stiffness:
+        k = r.stiffness
+        ku = "lbf/in" if system == "inch" else "N/mm"
+        lines += [
+            f"Grip: shank {k.ld:.4g} {lu}, threads {k.lt:.4g} {lu}",
+            f"Bolt stiffness kb      : {k.kb:,.0f} {ku}",
+            f"Member stiffness km    : {k.km:,.0f} {ku}",
+        ]
+    lines += [
+        f"Joint constant C       : {r.c:.3g}"
+        f"{' (calculated)' if r.stiffness else ''}",
         f"Max bolt load          : {r.bolt_load_max:,.0f} {fu}",
         f"Max bolt stress        : {r.stress_max:,.0f} {su}",
         f"Alternating stress     : {r.sigma_a:,.0f} {su}",
@@ -271,22 +340,34 @@ def main(argv=None):
     p.add_argument("--preload-fraction", type=float, default=0.75,
                    help="Fi as fraction of proof load (0.75 reusable, "
                         "0.90 permanent)")
+    p.add_argument("--grip", type=float,
+                   help="clamped thickness incl. washers (in or mm); "
+                        "with --bolt-length, calculates C")
+    p.add_argument("--bolt-length", type=float,
+                   help="bolt length under the head (in or mm)")
+    p.add_argument("--member", choices=list(MEMBERS), default="steel",
+                   help="clamped member material (default steel)")
     p.add_argument("--c", type=float, default=0.25,
                    help="joint constant kb/(kb+km), default 0.25 (ASSUMED)")
     p.add_argument("--no-joint", action="store_true",
                    help="bare bolt: no preload, bolt carries full load")
     a = p.parse_args(argv)
+    args = argv if argv is not None else sys.argv[1:]
+    c_given = any(x == "--c" or x.startswith("--c=") for x in args)
+    if c_given and a.grip is not None:
+        p.error("Give either --c or --grip/--bolt-length, not both.")
 
     try:
         r = analyze(a.size, a.grade, a.series, a.threads, a.load_max,
                     a.load_min, a.preload, a.preload_fraction, a.c,
-                    joint=not a.no_joint)
+                    joint=not a.no_joint, grip=a.grip,
+                    bolt_length=a.bolt_length, member=a.member)
     except ValueError as e:
         p.error(str(e))
     print(report(r, parse_size(a.size)[1]))
-    if not a.no_joint and "--c" not in (argv or sys.argv):
-        print("\nNote: C = 0.25 is an assumed default. Calculate it from "
-              "your joint's bolt and member stiffness.")
+    if not a.no_joint and not c_given and r.stiffness is None:
+        print("\nNote: C = 0.25 is an assumed default. Calculate it with "
+              "--grip and --bolt-length, or give --c.")
 
 
 if __name__ == "__main__":
