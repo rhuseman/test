@@ -39,6 +39,13 @@ infinite life) and joint separation.
   length (Table 8-7). Not valid for tapped holes or mixed materials.
 - Tension only: no shear, bending, or finite-life fatigue.
 
+## Web version
+
+`web/index.html` is an interactive page that uses `web/bolt_calc.js`, a
+JavaScript port of the same math. `test_web_port.py` regenerates reference
+results from the Python code (`web/make_golden.py`, about 6,000 cases) and
+fails if the JavaScript gives a different answer. Requires Node.js.
+
 ## Tests
 
 ```
