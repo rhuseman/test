@@ -111,7 +111,7 @@
   }
   .factor .short { display: none; }
   @media (max-width: 600px) {
-    .factors { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+    .factors { grid-template-columns: repeat(var(--n, 5), minmax(0, 1fr)); gap: 6px; }
     .factor { padding: 6px 4px; border-top-width: 3px; text-align: center; justify-items: center; gap: 0; }
     .factor .value { font-size: 20px; }
     .factor .state { padding: 0 6px; }
@@ -251,7 +251,8 @@
   </div>
 
   <footer>
-    <p>Safety factor bands: below 1.0 fails; 1.0 to 1.5 is a low margin; 1.5 and above is OK. Apply your own design code's margins.</p>
+    <p>How the tiles are judged. Preloaded joint: load factor n<sub>L</sub> = (S<sub>p</sub>A<sub>t</sub> − F<sub>i</sub>)/(C·P) (Shigley eq. 8-28), fatigue and separation fail below 1.0, show a low margin from 1.0 to 1.5, and are OK at 1.5 and above. Proof and yield only need 1.0, because the preload puts the bolt near proof strength on purpose.
+      Bare bolt: yield, proof, ultimate and fatigue use the same 1.0 and 1.5 bands. Apply your own design code's margins.</p>
     <p>Limits: calculated C assumes a through-bolt with nut, both members the same material, and standard thread length.
       Endurance strengths for SAE 1, 2 and ISO 4.6, 4.8, 5.8, and for all cut threads, are estimates scaled from Shigley Tables 8-16 and 8-17.
       Tension only: no shear, bending or finite-life fatigue. Verify results before using them for design.</p>
@@ -346,8 +347,9 @@
     ? x.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits }) : "∞";
   const sig = (x, n = 4) => Number.isFinite(x) ? Number(x.toPrecision(n)).toLocaleString("en-US", { maximumFractionDigits: 6 }) : "∞";
 
-  function stateOf(n) {
+  function stateOf(n, kind) {
     if (n < 1) return ["s-fail", "Fails", "Fail"];
+    if (kind === "pass") return ["s-ok", "OK", "OK"];
     if (n < 1.5) return ["s-warn", "Low margin", "Low"];
     return ["s-ok", "OK", "OK"];
   }
@@ -376,14 +378,22 @@
     const sys = r.system, su = sys === "inch" ? "psi" : "MPa", fu = sys === "inch" ? "lbf" : "N";
     const au = sys === "inch" ? "in²" : "mm²", ku = sys === "inch" ? "lbf/in" : "N/mm";
 
-    const factors = [
-      ["Yield", "Yield", r.n_yield], ["Proof", "Proof", r.n_proof], ["Ultimate", "Ult.", r.n_ultimate],
-      ["Fatigue", "Fatigue", r.n_fatigue], ["Separation", "Sep.", r.n_separation],
+    // Preloaded joint: static factors include the preload, which is set near
+    // proof on purpose, so they only need to reach 1.0. Margin is judged on
+    // the factors that respond to the external load.
+    const factors = o.joint ? [
+      ["Load factor", "Load", r.n_load, "margin"], ["Proof", "Proof", r.n_proof, "pass"],
+      ["Yield", "Yield", r.n_yield, "pass"], ["Fatigue", "Fatigue", r.n_fatigue, "margin"],
+      ["Separation", "Sep.", r.n_separation, "margin"],
+    ] : [
+      ["Yield", "Yield", r.n_yield, "margin"], ["Proof", "Proof", r.n_proof, "margin"],
+      ["Ultimate", "Ult.", r.n_ultimate, "margin"], ["Fatigue", "Fatigue", r.n_fatigue, "margin"],
     ];
-    $("factors").innerHTML = factors.map(([name, abbr, n]) => {
-      const [cls, label, shortLabel] = stateOf(n);
+    $("factors").style.setProperty("--n", factors.length);
+    $("factors").innerHTML = factors.map(([name, abbr, n, kind]) => {
+      const [cls, label, shortLabel] = stateOf(n, kind);
       const value = Number.isFinite(n) ? n.toFixed(2) : "∞";
-      return `<div class="factor ${cls}" role="group" aria-label="${name} safety factor ${value}, ${label}">
+      return `<div class="factor ${cls}" role="group" aria-label="${name}: ${value}, ${label}">
         <span class="name"><span class="full">${name}</span><span class="short" aria-hidden="true">${abbr}</span></span>
         <span class="value num">${value}</span>
         <span class="state"><span class="full">${label}</span><span class="short" aria-hidden="true">${shortLabel}</span></span></div>`;
@@ -410,6 +420,7 @@
       row("Maximum bolt stress", `${fmt(r.stress_max)} ${su}`) +
       row("Alternating stress σ<sub>a</sub>", `${fmt(r.sigma_a)} ${su}`) +
       row("Mean stress σ<sub>m</sub>", `${fmt(r.sigma_m)} ${su}`);
+    if (o.joint) loads += row("Safety factor vs ultimate", `${r.n_ultimate.toFixed(2)} (${stateOf(r.n_ultimate, "pass")[1]})`, "Needs 1.0; passes whenever yield does");
     $("tLoads").innerHTML = loads;
 
     drawChart(r);

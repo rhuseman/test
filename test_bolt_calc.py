@@ -96,6 +96,18 @@ class Analysis(unittest.TestCase):
         self.assertAlmostEqual(r.n_fatigue, 1.714, places=2)
         self.assertAlmostEqual(r.n_separation, 2.41, places=2)
         self.assertAlmostEqual(r.n_proof, 85000 / r.stress_max, places=6)
+        # nL = (Sp*At - Fi)/(C*P) = 0.25*85000*0.1419/(0.25*5000) = 2.41
+        self.assertAlmostEqual(r.n_load, 2.41, places=2)
+
+    def test_load_factor_limits(self):
+        # Bare bolt: load factor equals the proof factor.
+        bare = analyze("M12", "8.8", load_max=20000, joint=False)
+        self.assertAlmostEqual(bare.n_load, bare.n_proof, places=9)
+        # Preload above proof load: bolt is already past proof, nL < 0.
+        over = analyze("1/2", "5", load_max=5000, preload=13000)
+        self.assertLess(over.n_load, 0)
+        # No external load: infinite.
+        self.assertTrue(math.isinf(analyze("1/2", "5").n_load))
 
     def test_bare_bolt_metric(self):
         # M12 class 8.8 without preload, 0..20 kN:

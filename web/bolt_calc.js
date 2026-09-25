@@ -155,12 +155,14 @@
       : Infinity;
     const external_max = load_max * (1 - c);
     const n_separation = joint && external_max > 0 ? fi / external_max : Infinity;
+    const bolt_share = c * load_max;
+    const n_load = bolt_share > 0 ? (st.proof * at - fi) / bolt_share : Infinity;
     const factor = s => stress_max > 0 ? s / stress_max : Infinity;
     return {
       system, d, at, pitch, strength: st, se, se_note, preload: fi, c,
       bolt_load_max, stress_max, sigma_a, sigma_m,
       n_yield: factor(st.yield_), n_proof: factor(st.proof),
-      n_ultimate: factor(st.ultimate), n_fatigue, n_separation, stiffness,
+      n_ultimate: factor(st.ultimate), n_fatigue, n_separation, n_load, stiffness,
     };
   }
 

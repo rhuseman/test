@@ -14,7 +14,7 @@ import bolt_calc as bc  # noqa: E402
 
 FIELDS = ["at", "pitch", "se", "preload", "c", "bolt_load_max", "stress_max",
           "sigma_a", "sigma_m", "n_yield", "n_proof", "n_ultimate",
-          "n_fatigue", "n_separation"]
+          "n_fatigue", "n_separation", "n_load"]
 
 
 def num(x):

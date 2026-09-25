@@ -217,6 +217,7 @@ class Result:
     n_ultimate: float
     n_fatigue: float
     n_separation: float  # inf when there is no joint
+    n_load: float  # external load multiplier to reach proof (Shigley eq. 8-28)
     stiffness: Stiffness = None  # set when C was calculated
 
 
@@ -262,13 +263,16 @@ def analyze(size, grade, series="coarse", threads="rolled",
         n_f = math.inf
     external_max = load_max * (1 - c)
     n_sep = fi / external_max if joint and external_max > 0 else math.inf
+    bolt_share = c * load_max
+    n_load = ((st.proof * at - fi) / bolt_share if bolt_share > 0
+              else math.inf)
 
     def factor(s):
         return s / stress_max if stress_max > 0 else math.inf
 
     return Result(at, pitch, st, se, se_note, fi, c, bolt_max, stress_max,
                   sigma_a, sigma_m, factor(st.yield_), factor(st.proof),
-                  factor(st.ultimate), n_f, n_sep, stiffness)
+                  factor(st.ultimate), n_f, n_sep, n_load, stiffness)
 
 
 # --- Command line -----------------------------------------------------------
@@ -316,6 +320,8 @@ def report(r, system):
         f"  fatigue      {fmt(r.n_fatigue)}  {verdict(r.n_fatigue)}"
         "  (Goodman, infinite life)",
         f"  separation   {fmt(r.n_separation)}  {verdict(r.n_separation)}",
+        f"  load factor  {fmt(r.n_load)}  {verdict(r.n_load)}"
+        "  (external load multiplier to reach proof)",
     ]
     return "\n".join(lines)
 

@@ -27,7 +27,8 @@ python3 bolt_calc.py --help
 | `--no-joint` | Bare bolt: no preload, bolt carries the full load |
 
 Output: tensile stress area, proof/yield/ultimate/endurance strengths,
-and safety factors against yield, proof, ultimate, fatigue (Goodman,
+and safety factors against yield, proof, ultimate, load factor (Shigley
+eq. 8-28), fatigue (Goodman,
 infinite life) and joint separation.
 
 ## Limitations
